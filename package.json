@@ -1,0 +1,13 @@
+{
+  "name": "auth-worker",
+  "version": "1.0.0",
+  "description": "Cloudflare Worker with authentication",
+  "main": "src/index.js",
+  "scripts": {
+    "deploy": "wrangler deploy",
+    "dev": "wrangler dev"
+  },
+  "dependencies": {
+    "wrangler": "^4.3.0"
+  }
+}
