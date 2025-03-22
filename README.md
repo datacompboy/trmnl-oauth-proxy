@@ -60,11 +60,11 @@ npx wrangler deploy
 
 You will get your personal site address, go to admin/ here:
 
-- https://trmnl-oauth-proxy.somename.workers.dev/admin/
+- https://trmnl-oauth-proxy.yourname.workers.dev/admin/
 
 And log in with username and password you configured here.
 
-## Set up of datasource
+## Usage for some known sources
 
 ### How to set up proxy for Fitbit data access
 
@@ -72,7 +72,7 @@ And log in with username and password you configured here.
 
    - select "Personal" as OAuth 2.0 application type
    - put to "Redirect URL" the URL from your application, it shown at admin page
-     (`https://trmnl-oauth-proxy.somename.workers.dev/oauth/callback`)
+     (`https://trmnl-oauth-proxy.yourname.workers.dev/oauth/callback`)
 
 2. Go to your admin app and fill form:
 
@@ -89,12 +89,14 @@ And log in with username and password you configured here.
 
 3. Now in the `fitbit` application card below click the "Authorize" button.
 
+4. You can now fetch from TRMNL or any other place. You'll need to use path to your app and the token stored near
+   'Regenerate' button:
+
+   - `https://trmnl-oauth-proxy.yourname.workers.dev/get/fitbit/{PATH}?proxyToken={token}`
+  
+   For example, to get your steps, you could just go to
+  
+   - `https://trmnl-oauth-proxy.yourname.workers.dev/get/fitbit/1/user/-/activities/steps/date/today/1d/1min.json?proxyToken={token}`
+
+
 [available scopes]: https://dev.fitbit.com/build/reference/web-api/developer-guide/application-design/#Scopes
-
-## Usage of datasource
-
-## TODO
-
-1. Install cursor
-2. Vibe code
-
