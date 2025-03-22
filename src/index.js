@@ -426,6 +426,23 @@ export default {
             .authorize-btn:hover {
               background-color: #138496;
             }
+            .callback-url-container {
+              display: flex;
+              gap: 0.5rem;
+              align-items: center;
+            }
+            .callback-url-container input {
+              flex: 1;
+              background-color: #f8f9fa;
+              cursor: text;
+            }
+            .copy-btn {
+              background-color: #6c757d;
+              white-space: nowrap;
+            }
+            .copy-btn:hover {
+              background-color: #5a6268;
+            }
           </style>
         </head>
         <body>
@@ -461,6 +478,13 @@ export default {
                 <div class="form-group">
                   <label for="scope">OAuth Scopes (space-separated):</label>
                   <input type="text" id="scope" name="scope" placeholder="read" required>
+                </div>
+                <div class="form-group">
+                  <label for="callback_url">Callback URL (copy this to your OAuth application):</label>
+                  <div class="callback-url-container">
+                    <input type="text" id="callback_url" value="${new URL('/oauth/callback', request.url).toString()}" readonly>
+                    <button type="button" onclick="copyCallbackUrl()" class="copy-btn">Copy</button>
+                  </div>
                 </div>
                 <button type="submit">Add Application</button>
               </form>
@@ -504,6 +528,20 @@ export default {
           </div>
 
           <script>
+            function copyCallbackUrl() {
+              const callbackUrl = document.getElementById('callback_url');
+              callbackUrl.select();
+              document.execCommand('copy');
+              
+              // Visual feedback
+              const copyBtn = callbackUrl.nextElementSibling;
+              const originalText = copyBtn.textContent;
+              copyBtn.textContent = 'Copied!';
+              setTimeout(() => {
+                copyBtn.textContent = originalText;
+              }, 2000);
+            }
+
             function showEditForm(name, authPath, apiPath, scope) {
               const appCard = document.querySelector(\`[data-name="\${name}"]\`);
               if (!appCard) return;
