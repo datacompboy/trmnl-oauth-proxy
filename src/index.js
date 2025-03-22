@@ -196,6 +196,7 @@ export default {
           const clientId = formData.get('client_id');
           const authPath = formData.get('auth_path');
           const apiPath = formData.get('api_path');
+          const scope = formData.get('scope');
 
           // Check if name already exists
           const existingApp = await env.AUTH_KV.get(`app:${name}`);
@@ -209,7 +210,7 @@ export default {
           // Store the new application
           await env.AUTH_KV.put(
             `app:${name}`,
-            JSON.stringify({ name, clientId, authPath, apiPath })
+            JSON.stringify({ name, clientId, authPath, apiPath, scope })
           );
         } 
         else if (action === 'delete') {
@@ -220,6 +221,7 @@ export default {
           const name = formData.get('name');
           const authPath = formData.get('auth_path');
           const apiPath = formData.get('api_path');
+          const scope = formData.get('scope');
           
           // Get existing app data
           const existingApp = await env.AUTH_KV.get(`app:${name}`);
@@ -234,6 +236,7 @@ export default {
           // Update only allowed fields
           appData.authPath = authPath;
           appData.apiPath = apiPath;
+          appData.scope = scope;
           
           await env.AUTH_KV.put(`app:${name}`, JSON.stringify(appData));
         }
@@ -278,7 +281,7 @@ export default {
           authUrl.searchParams.set('state', state);
           authUrl.searchParams.set('code_challenge', codeChallenge);
           authUrl.searchParams.set('code_challenge_method', 'S256');
-          authUrl.searchParams.set('scope', 'activity'); // Adjust scopes as needed
+          authUrl.searchParams.set('scope', appData.scope || 'read'); // Use configured scope or default
 
           return new Response(null, {
             status: 302,
@@ -455,6 +458,10 @@ export default {
                   <label for="api_path">API Path:</label>
                   <input type="text" id="api_path" name="api_path" required>
                 </div>
+                <div class="form-group">
+                  <label for="scope">OAuth Scopes (space-separated):</label>
+                  <input type="text" id="scope" name="scope" placeholder="read" required>
+                </div>
                 <button type="submit">Add Application</button>
               </form>
             </div>
@@ -475,6 +482,7 @@ export default {
                     <p><strong>Client ID:</strong> ${app.clientId}</p>
                     <p><strong>Auth Path:</strong> ${app.authPath}</p>
                     <p><strong>API Path:</strong> ${app.apiPath}</p>
+                    <p><strong>Scopes:</strong> ${app.scope || 'read'}</p>
                     ${tokenInfo}
                     <div class="app-actions">
                       <form method="POST" style="display: inline;">
@@ -482,7 +490,7 @@ export default {
                         <input type="hidden" name="name" value="${app.name}">
                         <button type="submit" class="delete-btn">Delete</button>
                       </form>
-                      <button class="edit-btn" onclick="showEditForm('${app.name}', '${app.authPath}', '${app.apiPath}')">Edit</button>
+                      <button class="edit-btn" onclick="showEditForm('${app.name}', '${app.authPath}', '${app.apiPath}', '${app.scope}')">Edit</button>
                       <form method="POST" style="display: inline;">
                         <input type="hidden" name="action" value="authorize">
                         <input type="hidden" name="name" value="${app.name}">
@@ -496,7 +504,7 @@ export default {
           </div>
 
           <script>
-            function showEditForm(name, authPath, apiPath) {
+            function showEditForm(name, authPath, apiPath, scope) {
               const appCard = document.querySelector(\`[data-name="\${name}"]\`);
               if (!appCard) return;
 
@@ -520,6 +528,10 @@ export default {
                 <div class="form-group">
                   <label for="edit_api_path">API Path:</label>
                   <input type="text" id="edit_api_path" name="api_path" value="\${apiPath}" required>
+                </div>
+                <div class="form-group">
+                  <label for="edit_scope">OAuth Scopes (space-separated):</label>
+                  <input type="text" id="edit_scope" name="scope" value="\${scope || 'read'}" required>
                 </div>
                 <button type="submit">Save Changes</button>
                 <button type="button" onclick="this.closest('form').remove()">Cancel</button>
