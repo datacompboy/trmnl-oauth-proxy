@@ -207,10 +207,13 @@ export default {
             });
           }
 
+          // Generate a secure proxy token
+          const proxyToken = generateSecureToken();
+
           // Store the new application
           await env.AUTH_KV.put(
             `app:${name}`,
-            JSON.stringify({ name, clientId, authPath, apiPath, scope })
+            JSON.stringify({ name, clientId, authPath, apiPath, scope, proxyToken })
           );
         } 
         else if (action === 'delete') {
@@ -237,6 +240,22 @@ export default {
           appData.authPath = authPath;
           appData.apiPath = apiPath;
           appData.scope = scope;
+          
+          await env.AUTH_KV.put(`app:${name}`, JSON.stringify(appData));
+        }
+        else if (action === 'regenerate_token') {
+          const name = formData.get('name');
+          const existingApp = await env.AUTH_KV.get(`app:${name}`);
+          if (!existingApp) {
+            return new Response('Application not found', {
+              status: 404,
+              headers: { 'Content-Type': 'text/plain' }
+            });
+          }
+
+          const appData = JSON.parse(existingApp);
+          // Generate a new secure proxy token
+          appData.proxyToken = generateSecureToken();
           
           await env.AUTH_KV.put(`app:${name}`, JSON.stringify(appData));
         }
@@ -443,6 +462,25 @@ export default {
             .copy-btn:hover {
               background-color: #5a6268;
             }
+            .proxy-token-container {
+              display: flex;
+              gap: 0.5rem;
+              align-items: center;
+              margin-top: 0.5rem;
+            }
+            .proxy-token-container input {
+              flex: 1;
+              background-color: #f8f9fa;
+              cursor: text;
+              font-family: monospace;
+            }
+            .regenerate-btn {
+              background-color: #ffc107;
+              color: #000;
+            }
+            .regenerate-btn:hover {
+              background-color: #e0a800;
+            }
           </style>
         </head>
         <body>
@@ -507,6 +545,14 @@ export default {
                     <p><strong>Auth Path:</strong> ${app.authPath}</p>
                     <p><strong>API Path:</strong> ${app.apiPath}</p>
                     <p><strong>Scopes:</strong> ${app.scope || 'read'}</p>
+                    <div class="proxy-token-container">
+                      <input type="text" value="${app.proxyToken}" readonly>
+                      <form method="POST" style="display: inline;">
+                        <input type="hidden" name="action" value="regenerate_token">
+                        <input type="hidden" name="name" value="${app.name}">
+                        <button type="submit" class="regenerate-btn">Regenerate</button>
+                      </form>
+                    </div>
                     ${tokenInfo}
                     <div class="app-actions">
                       <form method="POST" style="display: inline;">
