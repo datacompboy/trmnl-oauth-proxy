@@ -35,7 +35,60 @@ regenerate simple extra auth token required to make requests at any time to prev
 
 ## Installation
 
+Run:
+
+```bash
+npx wrangler kv namespace create TRMNL_OAUTH_PROXY
+```
+
+Copy `wrangler.toml.example` to `wrangler.toml` and replace "id" in `[[kv_namespaces]]` with
+id of namespace you just created.
+
+Create your username and password:
+
+```
+npx wrangler kv key put --binding=AUTH_KV --remote "username" "admin"
+npx wrangler kv key put --binding=AUTH_KV --remote "password" "passpasspass"
+```
+
+Now, deploy the worker:
+
+```
+npx wrangler deploy
+```
+
+You will get your personal site address, go to admin/ here:
+
+- https://trmnl-oauth-proxy.somename.workers.dev/admin/
+
+And log in with username and password you configured here.
+
 ## Set up of datasource
+
+### How to set up proxy for Fitbit data access
+
+1. Go to https://dev.fitbit.com/apps and use "Register a new app" button.
+
+   - select "Personal" as OAuth 2.0 application type
+   - put to "Redirect URL" the URL from your application, it shown at admin page
+     (`https://trmnl-oauth-proxy.somename.workers.dev/oauth/callback`)
+
+2. Go to your admin app and fill form:
+
+   - Application Name: something like `fitbit`
+   - Client ID: Use the "OAuth 2.0 Client ID" of created application
+   - OAuth Authorize Path: `https://www.fitbit.com/oauth2/authorize`
+   - API Path: `https://api.fitbit.com/`
+   - OAuth Scopes (space-separated): `activity` (see full list of [available scopes])
+
+   You could authorize only ones you need now, if you'll need more later -- you'll
+   add them later.
+
+   Click `Add Application`
+
+3. Now in the `fitbit` application card below click the "Authorize" button.
+
+[available scopes]: https://dev.fitbit.com/build/reference/web-api/developer-guide/application-design/#Scopes
 
 ## Usage of datasource
 

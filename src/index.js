@@ -1,4 +1,84 @@
-import { WorkflowEntrypoint, WorkflowEvent, WorkflowStep } from 'cloudflare:workers';
+import { WorkflowEntrypoint } from 'cloudflare:workers';
+
+export class TokenRefreshWorkflow extends WorkflowEntrypoint {
+  async run(event, step) {
+    // Get all application keys only
+    const appKeys = await step.do('get-apps', async () => {
+      const list = await this.env.AUTH_KV.list({ prefix: 'app:' });
+      return list.keys.map(key => key.name);
+    });
+
+    // Process each application in parallel
+    const results = await Promise.all(
+      appKeys.map(appKey =>
+        step.do(`process-${appKey}`, async () => {
+          try {
+            // Get and parse app data only when needed
+            const appData = await this.env.AUTH_KV.get(appKey);
+            if (!appData) {
+              return { app: appKey, status: 'error', message: 'Application not found' };
+            }
+
+            const app = JSON.parse(appData);
+
+            // Skip if no refresh token or no access token
+            if (!app.refreshToken || !app.accessToken) {
+              return { app: app.name, status: 'skipped', reason: 'no tokens' };
+            }
+
+            // Check if token expires in less than 3 hours
+            const expirationTime = new Date(app.tokenExpiresAt);
+            const threeHoursFromNow = new Date(Date.now() + 3 * 60 * 60 * 1000);
+
+            if (expirationTime < threeHoursFromNow) {
+              try {
+                // Exchange refresh token for new access token
+                const tokenResponse = await fetch(new URL('/oauth2/token', app.apiPath).toString(), {
+                  method: 'POST',
+                  headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                  },
+                  body: new URLSearchParams({
+                    grant_type: 'refresh_token',
+                    refresh_token: app.refreshToken,
+                    client_id: app.clientId,
+                  }),
+                });
+
+                if (!tokenResponse.ok) {
+                  const responseText = await tokenResponse.text();
+                  console.error(`Failed to refresh token for ${app.name}. Status: ${tokenResponse.status}, Response: ${responseText}`);
+                  return { app: app.name, status: 'error', message: `Failed to refresh token: ${tokenResponse.status}` };
+                }
+
+                const tokens = await tokenResponse.json();
+
+                // Update app with new tokens
+                app.accessToken = tokens.access_token;
+                if (tokens.refresh_token) {
+                  app.refreshToken = tokens.refresh_token;
+                }
+                app.tokenExpiresAt = new Date(Date.now() + (tokens.expires_in * 1000)).toISOString();
+
+                await this.env.AUTH_KV.put(appKey, JSON.stringify(app));
+                console.log(`Successfully refreshed token for ${app.name}`);
+                return { app: app.name, status: 'success' };
+              } catch (error) {
+                console.error(`Error refreshing token for ${app.name}:`, error);
+                return { app: app.name, status: 'error', message: error.message };
+              }
+            } else {
+              return { app: app.name, status: 'skipped', reason: 'token not expiring soon' };
+            }
+          } catch (error) {
+            console.error(`Error processing ${appKey}:`, error);
+            return { app: appKey, status: 'error', message: error.message };
+          }
+        })
+      )
+    );
+  }
+}
 
 // Helper functions for session management
 function generateSecureToken() {
@@ -11,8 +91,8 @@ async function createSession(env, username) {
   const token = generateSecureToken();
   // Store session data with 15-minute TTL
   await env.AUTH_KV.put(
-    `session:${token}`, 
-    JSON.stringify({ username }), 
+    `session:${token}`,
+    JSON.stringify({ username }),
     { expirationTtl: 15 * 60 } // 15 minutes in seconds
   );
   return token;
@@ -21,7 +101,7 @@ async function createSession(env, username) {
 async function validateSession(env, token) {
   const sessionData = await env.AUTH_KV.get(`session:${token}`);
   if (!sessionData) return false;
-  
+
   const { username } = JSON.parse(sessionData);
   return username;
 }
@@ -29,7 +109,7 @@ async function validateSession(env, token) {
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
-    
+
     // Handle /get endpoint
     if (url.pathname.startsWith('/get/')) {
       // Extract app ID and path from the URL
@@ -103,7 +183,7 @@ export default {
         });
       }
     }
-    
+
     // Handle /admin endpoint
     if (url.pathname === '/admin') {
       // Handle POST request for authentication
@@ -111,15 +191,15 @@ export default {
         const formData = await request.formData();
         const username = formData.get('username');
         const password = formData.get('password');
-        
+
         // Get stored credentials from KV
         const storedUsername = await env.AUTH_KV.get('username');
         const storedPassword = await env.AUTH_KV.get('password');
-        
+
         if (username === storedUsername && password === storedPassword) {
           // Create a secure session
           const token = await createSession(env, username);
-          
+
           // Set a session cookie with secure flags
           return new Response(null, {
             status: 302,
@@ -135,7 +215,7 @@ export default {
           });
         }
       }
-      
+
       // Return the login form for GET requests
       return new Response(
         `<!DOCTYPE html>
@@ -248,7 +328,7 @@ export default {
       if (request.method === 'POST') {
         const formData = await request.formData();
         const action = formData.get('action');
-        
+
         if (action === 'logout') {
           // Delete the session
           await env.AUTH_KV.delete(`session:${session}`);
@@ -259,7 +339,7 @@ export default {
             }
           });
         }
-        
+
         if (action === 'create') {
           const name = formData.get('name');
           const clientId = formData.get('client_id');
@@ -284,7 +364,7 @@ export default {
             `app:${name}`,
             JSON.stringify({ name, clientId, authPath, apiPath, scope, proxyToken })
           );
-        } 
+        }
         else if (action === 'delete') {
           const name = formData.get('name');
           await env.AUTH_KV.delete(`app:${name}`);
@@ -294,7 +374,7 @@ export default {
           const authPath = formData.get('auth_path');
           const apiPath = formData.get('api_path');
           const scope = formData.get('scope');
-          
+
           // Get existing app data
           const existingApp = await env.AUTH_KV.get(`app:${name}`);
           if (!existingApp) {
@@ -309,7 +389,7 @@ export default {
           appData.authPath = authPath;
           appData.apiPath = apiPath;
           appData.scope = scope;
-          
+
           await env.AUTH_KV.put(`app:${name}`, JSON.stringify(appData));
         }
         else if (action === 'regenerate_token') {
@@ -325,7 +405,7 @@ export default {
           const appData = JSON.parse(existingApp);
           // Generate a new secure proxy token
           appData.proxyToken = generateSecureToken();
-          
+
           await env.AUTH_KV.put(`app:${name}`, JSON.stringify(appData));
         }
         else if (action === 'authorize') {
@@ -343,7 +423,7 @@ export default {
           const state = generateSecureToken();
           // Generate PKCE code verifier and challenge
           const codeVerifier = generateSecureToken();
-          const codeChallenge = await crypto.subtle.digest('SHA-256', 
+          const codeChallenge = await crypto.subtle.digest('SHA-256',
             new TextEncoder().encode(codeVerifier))
             .then(hash => btoa(String.fromCharCode(...new Uint8Array(hash)))
               .replace(/\+/g, '-')
@@ -354,9 +434,9 @@ export default {
           // Store state and code verifier
           await env.AUTH_KV.put(
             `oauth_state:${state}`,
-            JSON.stringify({ 
+            JSON.stringify({
               appName: name,
-              codeVerifier 
+              codeVerifier
             }),
             { expirationTtl: 15 * 60 } // 15 minutes
           );
@@ -606,7 +686,7 @@ export default {
                     ${app.refreshToken ? '<p><strong>Refresh Token:</strong> Available</p>' : ''}
                   </div>
                 ` : '';
-                
+
                 return `
                   <div class="app-card" data-name="${app.name}">
                     <h3>${app.name}</h3>
@@ -647,7 +727,7 @@ export default {
               const callbackUrl = document.getElementById('callback_url');
               callbackUrl.select();
               document.execCommand('copy');
-              
+
               // Visual feedback
               const copyBtn = callbackUrl.nextElementSibling;
               const originalText = copyBtn.textContent;
@@ -689,7 +769,7 @@ export default {
                 <button type="submit">Save Changes</button>
                 <button type="button" onclick="this.closest('form').remove()">Cancel</button>
               \`;
-              
+
               appCard.appendChild(form);
             }
           </script>
@@ -705,7 +785,7 @@ export default {
     if (url.pathname === '/oauth/callback') {
       const code = url.searchParams.get('code');
       const state = url.searchParams.get('state');
-      
+
       if (!code || !state) {
         return new Response('Invalid OAuth callback', {
           status: 400,
@@ -732,7 +812,7 @@ export default {
       }
 
       const app = JSON.parse(appData);
-      
+
       try {
         // Exchange code for tokens
         const tokenResponse = await fetch(new URL('/oauth2/token', app.apiPath).toString(), {
@@ -755,14 +835,14 @@ export default {
         }
 
         const tokens = await tokenResponse.json();
-        
+
         // Update app with tokens
         app.accessToken = tokens.access_token;
         app.refreshToken = tokens.refresh_token;
         app.tokenExpiresAt = new Date(Date.now() + (tokens.expires_in * 1000)).toISOString();
-        
+
         await env.AUTH_KV.put(`app:${appName}`, JSON.stringify(app));
-        
+
         // Clean up state
         await env.AUTH_KV.delete(`oauth_state:${state}`);
 
@@ -780,7 +860,7 @@ export default {
         });
       }
     }
-    
+
     // Handle unknown paths
     return new Response('Not Found', {
       status: 404,
@@ -792,97 +872,4 @@ export default {
     // Trigger the token refresh workflow using the binding
     await env.TOKEN_REFRESH_WORKFLOW.create();
   }
-}; 
-
-export class TokenRefreshWorkflow extends WorkflowEntrypoint {
-  async run(event, step) {
-    // Get all application keys only
-    const appKeys = await step.do('get-apps', async () => {
-      const list = await this.env.AUTH_KV.list({ prefix: 'app:' });
-      return list.keys.map(key => key.name);
-    });
-
-    // Process each application in parallel
-    const results = await Promise.all(
-      appKeys.map(appKey => 
-        step.do(`process-${appKey}`, async () => {
-          try {
-            // Get and parse app data only when needed
-            const appData = await this.env.AUTH_KV.get(appKey);
-            if (!appData) {
-              return { app: appKey, status: 'error', message: 'Application not found' };
-            }
-
-            const app = JSON.parse(appData);
-
-            // Skip if no refresh token or no access token
-            if (!app.refreshToken || !app.accessToken) {
-              return { app: app.name, status: 'skipped', reason: 'no tokens' };
-            }
-
-            // Check if token expires in less than 3 hours
-            const expirationTime = new Date(app.tokenExpiresAt);
-            const threeHoursFromNow = new Date(Date.now() + 3 * 60 * 60 * 1000);
-
-            if (expirationTime < threeHoursFromNow) {
-              try {
-                // Exchange refresh token for new access token
-                const tokenResponse = await fetch(new URL('/oauth2/token', app.apiPath).toString(), {
-                  method: 'POST',
-                  headers: {
-                    'Content-Type': 'application/x-www-form-urlencoded',
-                  },
-                  body: new URLSearchParams({
-                    grant_type: 'refresh_token',
-                    refresh_token: app.refreshToken,
-                    client_id: app.clientId,
-                  }),
-                });
-
-                if (!tokenResponse.ok) {
-                  const responseText = await tokenResponse.text();
-                  console.error(`Failed to refresh token for ${app.name}. Status: ${tokenResponse.status}, Response: ${responseText}`);
-                  return { app: app.name, status: 'error', message: `Failed to refresh token: ${tokenResponse.status}` };
-                }
-
-                const tokens = await tokenResponse.json();
-                
-                // Update app with new tokens
-                app.accessToken = tokens.access_token;
-                if (tokens.refresh_token) {
-                  app.refreshToken = tokens.refresh_token;
-                }
-                app.tokenExpiresAt = new Date(Date.now() + (tokens.expires_in * 1000)).toISOString();
-                
-                await this.env.AUTH_KV.put(appKey, JSON.stringify(app));
-                console.log(`Successfully refreshed token for ${app.name}`);
-                return { app: app.name, status: 'success' };
-              } catch (error) {
-                console.error(`Error refreshing token for ${app.name}:`, error);
-                return { app: app.name, status: 'error', message: error.message };
-              }
-            } else {
-              return { app: app.name, status: 'skipped', reason: 'token not expiring soon' };
-            }
-          } catch (error) {
-            console.error(`Error processing ${appKey}:`, error);
-            return { app: appKey, status: 'error', message: error.message };
-          }
-        })
-      )
-    );
-
-    // Log results
-    await step.do('log-results', async (results) => {
-      const summary = {
-        total: results.length,
-        success: results.filter(r => r.status === 'success').length,
-        error: results.filter(r => r.status === 'error').length,
-        skipped: results.filter(r => r.status === 'skipped').length,
-        details: results
-      };
-      console.log('Token refresh summary:', summary);
-      return summary;
-    });
-  }
-}
+};
