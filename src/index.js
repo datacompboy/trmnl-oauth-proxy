@@ -80,6 +80,26 @@ export class TokenRefreshWorkflow extends WorkflowEntrypoint {
   }
 }
 
+// Helper functions for password hashing
+async function generateSalt() {
+  const array = new Uint8Array(16);
+  crypto.getRandomValues(array);
+  return Array.from(array, byte => byte.toString(16).padStart(2, '0')).join('');
+}
+
+async function hashPassword(password, salt) {
+  const encoder = new TextEncoder();
+  const passwordData = encoder.encode(password + salt);
+  const hashBuffer = await crypto.subtle.digest('SHA-256', passwordData);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  return hashArray.map(byte => byte.toString(16).padStart(2, '0')).join('');
+}
+
+async function verifyPassword(password, salt, storedHash) {
+  const hash = await hashPassword(password, salt);
+  return hash === storedHash;
+}
+
 // Helper functions for session management
 function generateSecureToken() {
   const array = new Uint8Array(32);
@@ -194,25 +214,36 @@ export default {
 
         // Get stored credentials from KV
         const storedUsername = await env.AUTH_KV.get('username');
-        const storedPassword = await env.AUTH_KV.get('password');
+        const storedPasswordData = await env.AUTH_KV.get('password_data');
 
-        if (username === storedUsername && password === storedPassword) {
-          // Create a secure session
-          const token = await createSession(env, username);
-
-          // Set a session cookie with secure flags
-          return new Response(null, {
-            status: 302,
-            headers: {
-              'Set-Cookie': `session=${token}; HttpOnly; Secure; SameSite=Strict; Path=/`,
-              'Location': new URL('/admin/apps', request.url).toString()
-            }
-          });
+        if (!storedPasswordData) {
+          // First-time setup: create hashed password
+          const salt = await generateSalt();
+          const hash = await hashPassword(password, salt);
+          await env.AUTH_KV.put('password_data', JSON.stringify({ salt, hash }));
+          await env.AUTH_KV.put('username', username);
         } else {
-          return new Response('Invalid credentials', {
-            status: 401,
-            headers: { 'Content-Type': 'text/plain' }
-          });
+          const { salt, hash } = JSON.parse(storedPasswordData);
+          const isValid = await verifyPassword(password, salt, hash);
+
+          if (username === storedUsername && isValid) {
+            // Create a secure session
+            const token = await createSession(env, username);
+
+            // Set a session cookie with secure flags
+            return new Response(null, {
+              status: 302,
+              headers: {
+                'Set-Cookie': `session=${token}; HttpOnly; Secure; SameSite=Strict; Path=/`,
+                'Location': new URL('/admin/apps', request.url).toString()
+              }
+            });
+          } else {
+            return new Response('Invalid credentials', {
+              status: 401,
+              headers: { 'Content-Type': 'text/plain' }
+            });
+          }
         }
       }
 

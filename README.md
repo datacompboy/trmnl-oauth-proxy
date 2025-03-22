@@ -48,8 +48,9 @@ Create your username and password:
 
 ```
 npx wrangler kv key put --binding=AUTH_KV --remote "username" "admin"
-npx wrangler kv key put --binding=AUTH_KV --remote "password" "passpasspass"
 ```
+
+The password will be set on your first log in to the admin interface.
 
 Now, deploy the worker:
 
