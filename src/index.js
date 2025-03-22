@@ -237,6 +237,56 @@ export default {
           
           await env.AUTH_KV.put(`app:${name}`, JSON.stringify(appData));
         }
+        else if (action === 'authorize') {
+          const name = formData.get('name');
+          const app = await env.AUTH_KV.get(`app:${name}`);
+          if (!app) {
+            return new Response('Application not found', {
+              status: 404,
+              headers: { 'Content-Type': 'text/plain' }
+            });
+          }
+
+          const appData = JSON.parse(app);
+          // Generate state for CSRF protection
+          const state = generateSecureToken();
+          // Generate PKCE code verifier and challenge
+          const codeVerifier = generateSecureToken();
+          const codeChallenge = await crypto.subtle.digest('SHA-256', 
+            new TextEncoder().encode(codeVerifier))
+            .then(hash => btoa(String.fromCharCode(...new Uint8Array(hash)))
+              .replace(/\+/g, '-')
+              .replace(/\//g, '_')
+              .replace(/=+$/, '')
+            );
+
+          // Store state and code verifier
+          await env.AUTH_KV.put(
+            `oauth_state:${state}`,
+            JSON.stringify({ 
+              appName: name,
+              codeVerifier 
+            }),
+            { expirationTtl: 15 * 60 } // 15 minutes
+          );
+
+          // Redirect to OAuth authorization page
+          const authUrl = new URL(appData.authPath);
+          authUrl.searchParams.set('client_id', appData.clientId);
+          authUrl.searchParams.set('redirect_uri', new URL('/oauth/callback', request.url).toString());
+          authUrl.searchParams.set('response_type', 'code');
+          authUrl.searchParams.set('state', state);
+          authUrl.searchParams.set('code_challenge', codeChallenge);
+          authUrl.searchParams.set('code_challenge_method', 'S256');
+          authUrl.searchParams.set('scope', 'activity'); // Adjust scopes as needed
+
+          return new Response(null, {
+            status: 302,
+            headers: {
+              'Location': authUrl.toString()
+            }
+          });
+        }
 
         return new Response(null, {
           status: 302,
@@ -352,6 +402,27 @@ export default {
             .logout-btn:hover {
               background-color: #5a6268;
             }
+            .token-info {
+              margin-top: 1rem;
+              padding: 0.5rem;
+              background-color: #f8f9fa;
+              border-radius: 4px;
+              font-size: 0.9rem;
+            }
+            .token-info.expired {
+              background-color: #fff3cd;
+              color: #856404;
+            }
+            .token-info.valid {
+              background-color: #d4edda;
+              color: #155724;
+            }
+            .authorize-btn {
+              background-color: #17a2b8;
+            }
+            .authorize-btn:hover {
+              background-color: #138496;
+            }
           </style>
         </head>
         <body>
@@ -389,22 +460,38 @@ export default {
             </div>
 
             <div class="apps-list">
-              ${apps.map(app => `
-                <div class="app-card" data-name="${app.name}">
-                  <h3>${app.name}</h3>
-                  <p><strong>Client ID:</strong> ${app.clientId}</p>
-                  <p><strong>Auth Path:</strong> ${app.authPath}</p>
-                  <p><strong>API Path:</strong> ${app.apiPath}</p>
-                  <div class="app-actions">
-                    <form method="POST" style="display: inline;">
-                      <input type="hidden" name="action" value="delete">
-                      <input type="hidden" name="name" value="${app.name}">
-                      <button type="submit" class="delete-btn">Delete</button>
-                    </form>
-                    <button class="edit-btn" onclick="showEditForm('${app.name}', '${app.authPath}', '${app.apiPath}')">Edit</button>
+              ${apps.map(app => {
+                const tokenInfo = app.accessToken ? `
+                  <div class="token-info ${new Date(app.tokenExpiresAt) < new Date() ? 'expired' : 'valid'}">
+                    <p><strong>Access Token:</strong> ${app.accessToken.substring(0, 10)}...</p>
+                    <p><strong>Expires:</strong> ${new Date(app.tokenExpiresAt).toLocaleString()}</p>
+                    ${app.refreshToken ? '<p><strong>Refresh Token:</strong> Available</p>' : ''}
                   </div>
-                </div>
-              `).join('')}
+                ` : '';
+                
+                return `
+                  <div class="app-card" data-name="${app.name}">
+                    <h3>${app.name}</h3>
+                    <p><strong>Client ID:</strong> ${app.clientId}</p>
+                    <p><strong>Auth Path:</strong> ${app.authPath}</p>
+                    <p><strong>API Path:</strong> ${app.apiPath}</p>
+                    ${tokenInfo}
+                    <div class="app-actions">
+                      <form method="POST" style="display: inline;">
+                        <input type="hidden" name="action" value="delete">
+                        <input type="hidden" name="name" value="${app.name}">
+                        <button type="submit" class="delete-btn">Delete</button>
+                      </form>
+                      <button class="edit-btn" onclick="showEditForm('${app.name}', '${app.authPath}', '${app.apiPath}')">Edit</button>
+                      <form method="POST" style="display: inline;">
+                        <input type="hidden" name="action" value="authorize">
+                        <input type="hidden" name="name" value="${app.name}">
+                        <button type="submit" class="authorize-btn">Authorize</button>
+                      </form>
+                    </div>
+                  </div>
+                `;
+              }).join('')}
             </div>
           </div>
 
@@ -447,6 +534,86 @@ export default {
           headers: { 'Content-Type': 'text/html' }
         }
       );
+    }
+
+    // Handle OAuth callback
+    if (url.pathname === '/oauth/callback') {
+      const code = url.searchParams.get('code');
+      const state = url.searchParams.get('state');
+      
+      if (!code || !state) {
+        return new Response('Invalid OAuth callback', {
+          status: 400,
+          headers: { 'Content-Type': 'text/plain' }
+        });
+      }
+
+      // Validate state
+      const stateData = await env.AUTH_KV.get(`oauth_state:${state}`);
+      if (!stateData) {
+        return new Response('Invalid state', {
+          status: 400,
+          headers: { 'Content-Type': 'text/plain' }
+        });
+      }
+
+      const { appName, codeVerifier } = JSON.parse(stateData);
+      const appData = await env.AUTH_KV.get(`app:${appName}`);
+      if (!appData) {
+        return new Response('Application not found', {
+          status: 404,
+          headers: { 'Content-Type': 'text/plain' }
+        });
+      }
+
+      const app = JSON.parse(appData);
+      
+      try {
+        // Exchange code for tokens
+        const tokenResponse = await fetch(new URL('/oauth2/token', app.apiPath).toString(), {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+          },
+          body: new URLSearchParams({
+            grant_type: 'authorization_code',
+            code: code,
+            client_id: app.clientId,
+            redirect_uri: new URL('/oauth/callback', request.url).toString(),
+            code_verifier: codeVerifier
+          }),
+        });
+
+        if (!tokenResponse.ok) {
+          const responseText = await tokenResponse.text();
+          throw new Error(`Failed to exchange code for tokens. Status: ${tokenResponse.status}, Response: ${responseText}, URL: ${tokenResponse.url}`);
+        }
+
+        const tokens = await tokenResponse.json();
+        
+        // Update app with tokens
+        app.accessToken = tokens.access_token;
+        app.refreshToken = tokens.refresh_token;
+        app.tokenExpiresAt = new Date(Date.now() + (tokens.expires_in * 1000)).toISOString();
+        
+        await env.AUTH_KV.put(`app:${appName}`, JSON.stringify(app));
+        
+        // Clean up state
+        await env.AUTH_KV.delete(`oauth_state:${state}`);
+
+        // Redirect back to apps page
+        return new Response(null, {
+          status: 302,
+          headers: {
+            'Location': new URL('/admin/apps', request.url).toString()
+          }
+        });
+      } catch (error) {
+        return new Response('Failed to complete OAuth flow: ' + error.message, {
+          status: 500,
+          headers: { 'Content-Type': 'text/plain' }
+        });
+      }
     }
     
     // Handle unknown paths
