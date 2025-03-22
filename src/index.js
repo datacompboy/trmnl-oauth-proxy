@@ -431,12 +431,13 @@ export default {
               .replace(/=+$/, '')
             );
 
-          // Store state and code verifier
+          // Store state, code verifier, and session
           await env.AUTH_KV.put(
             `oauth_state:${state}`,
             JSON.stringify({
               appName: name,
-              codeVerifier
+              codeVerifier,
+              session
             }),
             { expirationTtl: 15 * 60 } // 15 minutes
           );
@@ -802,7 +803,7 @@ export default {
         });
       }
 
-      const { appName, codeVerifier } = JSON.parse(stateData);
+      const { appName, codeVerifier, session } = JSON.parse(stateData);
       const appData = await env.AUTH_KV.get(`app:${appName}`);
       if (!appData) {
         return new Response('Application not found', {
@@ -846,13 +847,20 @@ export default {
         // Clean up state
         await env.AUTH_KV.delete(`oauth_state:${state}`);
 
-        // Redirect back to apps page
-        return new Response(null, {
+        // Create response with redirect and restore session
+        const response = new Response(null, {
           status: 302,
           headers: {
             'Location': new URL('/admin/apps', request.url).toString()
           }
         });
+
+        // Restore the session cookie if we have it
+        if (session) {
+          response.headers.set('Set-Cookie', `session=${session}; HttpOnly; Secure; SameSite=Strict; Path=/`);
+        }
+
+        return response;
       } catch (error) {
         return new Response('Failed to complete OAuth flow: ' + error.message, {
           status: 500,
