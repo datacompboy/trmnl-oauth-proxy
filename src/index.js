@@ -847,20 +847,55 @@ export default {
         // Clean up state
         await env.AUTH_KV.delete(`oauth_state:${state}`);
 
-        // Create response with redirect and restore session
-        const response = new Response(null, {
-          status: 302,
-          headers: {
-            'Location': new URL('/admin/apps', request.url).toString()
+        // Return HTML page with client-side redirect
+        return new Response(
+          `<!DOCTYPE html>
+          <html>
+          <head>
+            <title>Authorization Complete</title>
+            <meta http-equiv="refresh" content="3;url=${new URL('/admin/apps', request.url).toString()}">
+            <style>
+              body {
+                font-family: Arial, sans-serif;
+                display: flex;
+                justify-content: center;
+                align-items: center;
+                height: 100vh;
+                margin: 0;
+                background-color: #f5f5f5;
+              }
+              .message {
+                text-align: center;
+                background: white;
+                padding: 2rem;
+                border-radius: 8px;
+                box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+              }
+              a {
+                color: #007bff;
+                text-decoration: none;
+              }
+              a:hover {
+                text-decoration: underline;
+              }
+            </style>
+          </head>
+          <body>
+            <div class="message">
+              <h2>Authorization Complete</h2>
+              <p>You will be redirected automatically in 3 seconds.</p>
+              <p>If you are not redirected, <a href="${new URL('/admin/apps', request.url).toString()}">click here</a> to proceed.</p>
+            </div>
+          </body>
+          </html>`,
+          {
+            status: 200,
+            headers: {
+              'Content-Type': 'text/html',
+              'Set-Cookie': `session=${session}; HttpOnly; Secure; SameSite=Strict; Path=/`
+            }
           }
-        });
-
-        // Restore the session cookie if we have it
-        if (session) {
-          response.headers.set('Set-Cookie', `session=${session}; HttpOnly; Secure; SameSite=Strict; Path=/`);
-        }
-
-        return response;
+        );
       } catch (error) {
         return new Response('Failed to complete OAuth flow: ' + error.message, {
           status: 500,
