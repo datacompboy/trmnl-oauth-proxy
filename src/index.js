@@ -29,10 +29,77 @@ export default {
     const url = new URL(request.url);
     
     // Handle /get endpoint
-    if (url.pathname === '/get') {
-      return new Response('OK', {
-        headers: { 'Content-Type': 'text/plain' }
-      });
+    if (url.pathname.startsWith('/get/')) {
+      // Extract app ID and path from the URL
+      const [, , appId, ...pathParts] = url.pathname.split('/');
+      const path = pathParts.join('/');
+      const proxyToken = url.searchParams.get('proxyToken');
+
+      if (!appId || !proxyToken) {
+        return new Response('Missing app ID or proxy token', {
+          status: 400,
+          headers: { 'Content-Type': 'text/plain' }
+        });
+      }
+
+      // Get app configuration
+      const appData = await env.AUTH_KV.get(`app:${appId}`);
+      if (!appData) {
+        return new Response('Application not found', {
+          status: 404,
+          headers: { 'Content-Type': 'text/plain' }
+        });
+      }
+
+      const app = JSON.parse(appData);
+
+      // Validate proxy token
+      if (app.proxyToken !== proxyToken) {
+        return new Response('Invalid proxy token', {
+          status: 401,
+          headers: { 'Content-Type': 'text/plain' }
+        });
+      }
+
+      // Check if we have a valid access token
+      if (!app.accessToken || new Date(app.tokenExpiresAt) < new Date()) {
+        return new Response('No valid access token. Please authorize the application first.', {
+          status: 401,
+          headers: { 'Content-Type': 'text/plain' }
+        });
+      }
+
+      try {
+        // Construct the target URL with all query parameters except proxyToken
+        const targetUrl = new URL(path, app.apiPath);
+        // Copy all query parameters except proxyToken
+        for (const [key, value] of url.searchParams.entries()) {
+          if (key !== 'proxyToken') {
+            targetUrl.searchParams.set(key, value);
+          }
+        }
+
+        // Forward the request with the OAuth token
+        const response = await fetch(targetUrl.toString(), {
+          method: request.method,
+          headers: {
+            ...Object.fromEntries(request.headers),
+            'Authorization': `Bearer ${app.accessToken}`,
+            'Host': new URL(app.apiPath).host
+          }
+        });
+
+        // Return the response with the same status and headers
+        return new Response(response.body, {
+          status: response.status,
+          headers: response.headers
+        });
+      } catch (error) {
+        return new Response('Failed to proxy request: ' + error.message, {
+          status: 500,
+          headers: { 'Content-Type': 'text/plain' }
+        });
+      }
     }
     
     // Handle /admin endpoint
