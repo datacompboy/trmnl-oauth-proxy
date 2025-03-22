@@ -1,5 +1,8 @@
 # trmnl-oauth-proxy
 
+Disclaimer: code mostly written with assist from Cursor.com. I tried to steer it to something I
+won't completely dislike, but... It works.
+
 ## Back story
 
 The http://usetrmnl.com/ device is cool idea to display rarely updated data to an e-Ink display.
