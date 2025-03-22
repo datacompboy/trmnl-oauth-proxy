@@ -1,3 +1,5 @@
+import { WorkflowEntrypoint, WorkflowEvent, WorkflowStep } from 'cloudflare:workers';
+
 // Helper functions for session management
 function generateSecureToken() {
   const array = new Uint8Array(32);
@@ -784,5 +786,103 @@ export default {
       status: 404,
       headers: { 'Content-Type': 'text/plain' }
     });
+  },
+
+  async scheduled(event, env, ctx) {
+    // Trigger the token refresh workflow using the binding
+    await env.TOKEN_REFRESH_WORKFLOW.create();
   }
 }; 
+
+export class TokenRefreshWorkflow extends WorkflowEntrypoint {
+  async run(event, step) {
+    // Get all application keys only
+    const appKeys = await step.do('get-apps', async () => {
+      const list = await this.env.AUTH_KV.list({ prefix: 'app:' });
+      return list.keys.map(key => key.name);
+    });
+
+    // Process each application in parallel
+    const results = await Promise.all(
+      appKeys.map(appKey => 
+        step.do(`process-${appKey}`, async () => {
+          try {
+            // Get and parse app data only when needed
+            const appData = await this.env.AUTH_KV.get(appKey);
+            if (!appData) {
+              return { app: appKey, status: 'error', message: 'Application not found' };
+            }
+
+            const app = JSON.parse(appData);
+
+            // Skip if no refresh token or no access token
+            if (!app.refreshToken || !app.accessToken) {
+              return { app: app.name, status: 'skipped', reason: 'no tokens' };
+            }
+
+            // Check if token expires in less than 3 hours
+            const expirationTime = new Date(app.tokenExpiresAt);
+            const threeHoursFromNow = new Date(Date.now() + 3 * 60 * 60 * 1000);
+
+            if (expirationTime < threeHoursFromNow) {
+              try {
+                // Exchange refresh token for new access token
+                const tokenResponse = await fetch(new URL('/oauth2/token', app.apiPath).toString(), {
+                  method: 'POST',
+                  headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                  },
+                  body: new URLSearchParams({
+                    grant_type: 'refresh_token',
+                    refresh_token: app.refreshToken,
+                    client_id: app.clientId,
+                  }),
+                });
+
+                if (!tokenResponse.ok) {
+                  const responseText = await tokenResponse.text();
+                  console.error(`Failed to refresh token for ${app.name}. Status: ${tokenResponse.status}, Response: ${responseText}`);
+                  return { app: app.name, status: 'error', message: `Failed to refresh token: ${tokenResponse.status}` };
+                }
+
+                const tokens = await tokenResponse.json();
+                
+                // Update app with new tokens
+                app.accessToken = tokens.access_token;
+                if (tokens.refresh_token) {
+                  app.refreshToken = tokens.refresh_token;
+                }
+                app.tokenExpiresAt = new Date(Date.now() + (tokens.expires_in * 1000)).toISOString();
+                
+                await this.env.AUTH_KV.put(appKey, JSON.stringify(app));
+                console.log(`Successfully refreshed token for ${app.name}`);
+                return { app: app.name, status: 'success' };
+              } catch (error) {
+                console.error(`Error refreshing token for ${app.name}:`, error);
+                return { app: app.name, status: 'error', message: error.message };
+              }
+            } else {
+              return { app: app.name, status: 'skipped', reason: 'token not expiring soon' };
+            }
+          } catch (error) {
+            console.error(`Error processing ${appKey}:`, error);
+            return { app: appKey, status: 'error', message: error.message };
+          }
+        })
+      )
+    );
+
+    // Log results
+    await step.do('log-results', async (results) => {
+      const summary = {
+        total: results.length,
+        success: results.filter(r => r.status === 'success').length,
+        error: results.filter(r => r.status === 'error').length,
+        skipped: results.filter(r => r.status === 'skipped').length,
+        details: results
+      };
+      console.log('Token refresh summary:', summary);
+      return summary;
+    });
+  }
+}
