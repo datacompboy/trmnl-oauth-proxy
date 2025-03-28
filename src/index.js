@@ -42,6 +42,7 @@ export class TokenRefreshWorkflow extends WorkflowEntrypoint {
                     grant_type: 'refresh_token',
                     refresh_token: app.refreshToken,
                     client_id: app.clientId,
+                    client_secret: app.clientSecret
                   }),
                 });
 
@@ -374,6 +375,7 @@ export default {
         if (action === 'create') {
           const name = formData.get('name');
           const clientId = formData.get('client_id');
+          const clientSecret = formData.get('client_secret');
           const authPath = formData.get('auth_path');
           const apiPath = formData.get('api_path');
           const scope = formData.get('scope');
@@ -393,7 +395,7 @@ export default {
           // Store the new application
           await env.AUTH_KV.put(
             `app:${name}`,
-            JSON.stringify({ name, clientId, authPath, apiPath, scope, proxyToken })
+            JSON.stringify({ name, clientId, clientSecret, authPath, apiPath, scope, proxyToken })
           );
         }
         else if (action === 'delete') {
@@ -687,6 +689,10 @@ export default {
                   <input type="text" id="client_id" name="client_id" required>
                 </div>
                 <div class="form-group">
+                  <label for="client_secret">Client Secret:</label>
+                  <input type="password" id="client_secret" name="client_secret" required>
+                </div>
+                <div class="form-group">
                   <label for="auth_path">OAuth Authorize Path:</label>
                   <input type="text" id="auth_path" name="auth_path" required>
                 </div>
@@ -856,6 +862,7 @@ export default {
             grant_type: 'authorization_code',
             code: code,
             client_id: app.clientId,
+            client_secret: app.clientSecret,
             redirect_uri: new URL('/oauth/callback', request.url).toString(),
             code_verifier: codeVerifier
           }),
