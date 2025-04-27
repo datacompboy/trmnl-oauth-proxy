@@ -81,7 +81,9 @@ Next, log in with username and password you configured earlier.
 
    - Application Name: something like `fitbit`
    - Client ID: Use the "OAuth 2.0 Client ID" of created application
-   - OAuth Authorize Path: `https://www.fitbit.com/oauth2/authorize`
+   - Client Secret: use the "Client secret" from the app above
+   - OAuth Authorize Path: `https://www.fitbit.com/oauth2/authorize` (not: `www` there)
+   - OAuth Token Exchange Path: `https://api.fitbit.com/oauth2/token` (note: `api` there)
    - API Path: `https://api.fitbit.com/`
    - OAuth Scopes (space-separated): `activity` (see full list of [available scopes])
 
@@ -103,3 +105,32 @@ Next, log in with username and password you configured earlier.
 
 
 [available scopes]: https://dev.fitbit.com/build/reference/web-api/developer-guide/application-design/#Scopes
+
+
+### How to set up proxy for Netatmo data access
+
+1. Log in at https://dev.netatmo.com/
+
+2. Go to https://dev.netatmo.com/apps/ and click "Create"
+
+   - use some uniq app name (like "my-super-cool-app-name-for-trmnl" (replacing my with your name ;) )
+   - "data protection officer" name and email: use yours
+   - Once it created, click on the app and copy the "client ID" and "client secret" from the form
+
+3. Go to your admin app and fill the form:
+
+   - Application Name: something like `netatmo`
+   - Client ID: use the "client ID" from the app above
+   - Client Secret: use the "client Secret" from the app above
+   - OAuth Authorize Path: `https://api.netatmo.com/oauth2/authorize`
+   - OAuth Token Exchange Path: `https://api.netatmo.com/oauth2/token`
+   - API Path: `https://api.netatmo.com/`
+   - Scopes: `read_station`
+
+   Click `Add Application`
+
+3. Now in the `netatmo` application card click "Authorize" button.
+
+4. Feel free to grab my [Netatmo plugin](https://www.reddit.com/r/trmnl/comments/1jmo3q3/comment/mkvm85u/?utm_source=share&utm_medium=web3x&utm_name=web3xcss&utm_term=1&utm_content=share_button)
+
+

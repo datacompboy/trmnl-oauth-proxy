@@ -33,7 +33,8 @@ export class TokenRefreshWorkflow extends WorkflowEntrypoint {
             if (expirationTime < threeHoursFromNow) {
               try {
                 // Exchange refresh token for new access token
-                const tokenResponse = await fetch(new URL('/oauth2/token', app.apiPath).toString(), {
+                const tokenUrl = (app.tokenPath || app.authPath).toString();
+                const tokenResponse = await fetch(tokenUrl, {
                   method: 'POST',
                   headers: {
                     'Content-Type': 'application/x-www-form-urlencoded',
@@ -377,6 +378,7 @@ export default {
           const clientId = formData.get('client_id');
           const clientSecret = formData.get('client_secret');
           const authPath = formData.get('auth_path');
+          const tokenPath = formData.get('token_path') || ''; // Store empty if not set
           const apiPath = formData.get('api_path');
           const scope = formData.get('scope');
 
@@ -395,7 +397,7 @@ export default {
           // Store the new application
           await env.AUTH_KV.put(
             `app:${name}`,
-            JSON.stringify({ name, clientId, clientSecret, authPath, apiPath, scope, proxyToken })
+            JSON.stringify({ name, clientId, clientSecret, authPath, tokenPath, apiPath, scope, proxyToken })
           );
         }
         else if (action === 'delete') {
@@ -405,6 +407,7 @@ export default {
         else if (action === 'edit') {
           const name = formData.get('name');
           const authPath = formData.get('auth_path');
+          const tokenPath = formData.get('token_path') || ''; // Store empty if not set
           const apiPath = formData.get('api_path');
           const scope = formData.get('scope');
 
@@ -420,6 +423,7 @@ export default {
           const appData = JSON.parse(existingApp);
           // Update only allowed fields
           appData.authPath = authPath;
+          appData.tokenPath = tokenPath;
           appData.apiPath = apiPath;
           appData.scope = scope;
 
@@ -697,6 +701,10 @@ export default {
                   <input type="text" id="auth_path" name="auth_path" required>
                 </div>
                 <div class="form-group">
+                  <label for="token_path">OAuth Token Exchange Path (optional):</label>
+                  <input type="text" id="token_path" name="token_path" placeholder="Leave empty to use Authorize Path">
+                </div>
+                <div class="form-group">
                   <label for="api_path">API Path:</label>
                   <input type="text" id="api_path" name="api_path" required>
                 </div>
@@ -730,6 +738,7 @@ export default {
                     <h3>${app.name}</h3>
                     <p><strong>Client ID:</strong> ${app.clientId}</p>
                     <p><strong>Auth Path:</strong> ${app.authPath}</p>
+                    ${app.tokenPath ? `<p><strong>Token Path:</strong> ${app.tokenPath}</p>` : ''}
                     <p><strong>API Path:</strong> ${app.apiPath}</p>
                     <p><strong>Scopes:</strong> ${app.scope || 'read'}</p>
                     <div class="proxy-token-container">
@@ -747,7 +756,7 @@ export default {
                         <input type="hidden" name="name" value="${app.name}">
                         <button type="submit" class="delete-btn">Delete</button>
                       </form>
-                      <button class="edit-btn" onclick="showEditForm('${app.name}', '${app.authPath}', '${app.apiPath}', '${app.scope}')">Edit</button>
+                      <button class="edit-btn" onclick="showEditForm('${app.name}', '${app.authPath}', '${app.tokenPath || ''}', '${app.apiPath}', '${app.scope}')">Edit</button>
                       <form method="POST" style="display: inline;">
                         <input type="hidden" name="action" value="authorize">
                         <input type="hidden" name="name" value="${app.name}">
@@ -775,7 +784,7 @@ export default {
               }, 2000);
             }
 
-            function showEditForm(name, authPath, apiPath, scope) {
+            function showEditForm(name, authPath, tokenPath, apiPath, scope) {
               const appCard = document.querySelector(\`[data-name="\${name}"]\`);
               if (!appCard) return;
 
@@ -795,6 +804,10 @@ export default {
                 <div class="form-group">
                   <label for="edit_auth_path">OAuth Authorize Path:</label>
                   <input type="text" id="edit_auth_path" name="auth_path" value="\${authPath}" required>
+                </div>
+                <div class="form-group">
+                  <label for="edit_token_path">OAuth Token Exchange Path (optional):</label>
+                  <input type="text" id="edit_token_path" name="token_path" value="\${tokenPath || ''}" placeholder="Leave empty to use Authorize Path">
                 </div>
                 <div class="form-group">
                   <label for="edit_api_path">API Path:</label>
@@ -853,7 +866,8 @@ export default {
 
       try {
         // Exchange code for tokens
-        const tokenResponse = await fetch(new URL('/oauth2/token', app.apiPath).toString(), {
+        const tokenUrl = (app.tokenPath || app.authPath).toString();
+        const tokenResponse = await fetch(tokenUrl, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/x-www-form-urlencoded',
