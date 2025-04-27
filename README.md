@@ -61,11 +61,11 @@ Now, deploy the worker:
 npx wrangler deploy
 ```
 
-You will get your personal site address, go to admin/ here:
+You will get your personal site address, replace the subdomain with the address for your Cloudflare account, and go to the /admin URL:
 
-- https://trmnl-oauth-proxy.yourname.workers.dev/admin/
+- https://trmnl-oauth-proxy.<yourname.workers.dev>/admin
 
-And log in with username and password you configured here.
+Next, log in with username and password you configured earlier.
 
 ## Usage for some known sources
 
